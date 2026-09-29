@@ -22,6 +22,18 @@
 - 页面并列显示两支探头的速率曲线（含交点、按下包络来源着色）与保守段明细表，**表格与图形使用同一响应**。
 - 双探头输入或请求失败只清除本次比较，不改写已经显示的单探头结论；原 `/api/lethality` 接口及其响应保持兼容。
 
+### 三探头中位复核（可选模式）
+
+新增第三支探头时，质检员按**任一时刻三支探头致死速率的中位值**积分 F₀，而不是先分别算三份总 F₀ 再取其中位数；后者会掩盖单支探头在局部时间段的异常。
+
+- `/api/lethality/triple` 要求 `probeA`、`probeB`、`probeC` 三路均存在，各自遵守单探头的全部采样校验，并共同从 0 秒开始、结束于同一秒。
+- 后端在三路采样时刻的并集上构造三条分段线性速率曲线，再加入任两条曲线的内部交点作为共享边界。
+- 每个切出的时间段在开区间中点确定中位来源；并列中位值按固定探头顺序 **A → B → C** 裁决：两低值并列取顺序靠前者，两高值并列同样取并列者中的顺序靠前者，三线重合取 `probeA`。
+- 交点恰好重合时合并为同一个共享边界；端点贴线、采样节点换序和浮点尾噪都按同一规则处理，响应不产生零时长片段。
+- 每段返回来源探头、来源裁决说明、三探头起止速率、起止共享边界编号及未舍入贡献；顶层 `boundaries` 与 `segments` 是计算摘要、片段表和图表共用的唯一边界来源。
+- 放行只比较未舍入的 `medianUnrounded` 与 3.00 min 门槛；`medianF0` 仅为两位小数展示口径，展示舍入不得改变放行判断。
+- 第三路缺样、时间域不相交/结束秒不一致或任一路数据非法时，本次三探头请求返回 422；页面会保留上一份有效的三探头报告。原单、双探头接口和响应语义不变。
+
 ## 快速开始（Docker Compose）
 
 ```bash
@@ -170,6 +182,70 @@ docker compose --profile e2e run --rm e2e
 - `source` 为 `probeA` / `probeB` / `both`（两线重合）；交点拆段后相邻段在交点处速率相等。
 - 段 `startTime/endTime` 为交点时可以是小数秒（采样时刻本身仍是整数秒）。
 - 跨探头整体问题（如两支探头结束秒不一致）：`{"row": null, "field": "probe", "probe": null, ...}`；单支探头的问题带 `"probe": "probeA" | "probeB"`。
+
+### `POST /api/lethality/triple`
+
+三探头逐刻中位值复核。请求体在双探头基础上增加 `probeC`：
+
+```json
+{
+  "probeA": { "points": [{ "time": 0, "temperature": 121.1 }] },
+  "probeB": { "points": [{ "time": 0, "temperature": 121.2 }] },
+  "probeC": { "points": [{ "time": 0, "temperature": 121.3 }] }
+}
+```
+
+响应关键字段：
+
+```json
+{
+  "mode": "triple",
+  "probeA": { "probe": "probeA", "points": [], "totalUnrounded": 0.0, "f0": 0.0 },
+  "probeB": { "...": "..." },
+  "probeC": { "...": "..." },
+  "medianUnrounded": 2.875,
+  "medianF0": 2.88,
+  "passed": false,
+  "shortfall": 0.125,
+  "boundaries": [
+    {
+      "index": 1,
+      "time": 0.0,
+      "type": "sample",
+      "crossingPairs": [],
+      "probeARate": 1.0,
+      "probeBRate": 5.0,
+      "probeCRate": 2.0,
+      "medianRate": 2.0,
+      "medianSource": "probeC",
+      "reason": "采样节点……",
+      "medianReason": "探头C速率在三支探头中唯一排第 2，贡献中位值"
+    }
+  ],
+  "segments": [
+    {
+      "index": 1,
+      "startBoundaryIndex": 1,
+      "endBoundaryIndex": 2,
+      "startTime": 0.0,
+      "endTime": 22.5,
+      "source": "probeC",
+      "sourceReason": "探头C速率在三支探头中唯一排第 2，贡献中位值",
+      "probeAStartRate": 1.0,
+      "probeAEndRate": 2.5,
+      "probeBStartRate": 5.0,
+      "probeBEndRate": 3.5,
+      "probeCStartRate": 2.0,
+      "probeCEndRate": 3.5,
+      "contribution": 1.03125
+    }
+  ]
+}
+```
+
+- `boundaries[].type` 为 `sample`（采样节点）或 `crossing`（内部曲线交点；多个线对交点重合时 `crossingPairs` 同时列出）。
+- 片段的 `startTime/endTime` 必须分别等于其 `startBoundaryIndex/endBoundaryIndex` 指向的边界时间；图表和表格均不得另行构造边界。
+- 校验错误仍使用统一 422 结构；第三路问题带 `"probe": "probeC"`，共同时间域问题为 `row: null`、`field: "probe"`。
 
 ## 本地开发
 

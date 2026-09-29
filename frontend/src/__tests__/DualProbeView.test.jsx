@@ -65,6 +65,62 @@ const dualCrossingResponse = {
   ],
 };
 
+const tripleResponse = {
+  mode: 'triple',
+  threshold: 3.0,
+  probeA: {
+    probe: 'probeA',
+    points: [
+      { time: 0, temperature: 100, rate: 1 },
+      { time: 60, temperature: 115, rate: 5 },
+    ],
+    totalUnrounded: 3,
+    f0: 3,
+  },
+  probeB: {
+    probe: 'probeB',
+    points: [
+      { time: 0, temperature: 115, rate: 5 },
+      { time: 60, temperature: 100, rate: 1 },
+    ],
+    totalUnrounded: 3,
+    f0: 3,
+  },
+  probeC: {
+    probe: 'probeC',
+    points: [
+      { time: 0, temperature: 105, rate: 2 },
+      { time: 30, temperature: 112, rate: 4 },
+      { time: 60, temperature: 105, rate: 2 },
+    ],
+    totalUnrounded: 2.8,
+    f0: 2.8,
+  },
+  probeATotalUnrounded: 3,
+  probeBTotalUnrounded: 3,
+  probeCTotalUnrounded: 2.8,
+  probeAF0: 3,
+  probeBF0: 3,
+  probeCF0: 2.8,
+  medianUnrounded: 2.875,
+  medianF0: 2.88,
+  passed: false,
+  shortfall: 0.125,
+  boundaries: [
+    { index: 1, time: 0, type: 'sample', crossingPairs: [], probeARate: 1, probeBRate: 5, probeCRate: 2, medianRate: 2, medianSource: 'probeC', reason: '采样节点' },
+    { index: 2, time: 22.5, type: 'crossing', crossingPairs: [['probeB', 'probeC']], probeARate: 2.5, probeBRate: 3.5, probeCRate: 3.5, medianRate: 3.5, medianSource: 'probeB', reason: '曲线交点：探头B/探头C' },
+    { index: 3, time: 30, type: 'sample', crossingPairs: [['probeA', 'probeB']], probeARate: 3, probeBRate: 3, probeCRate: 4, medianRate: 3, medianSource: 'probeA', reason: '采样节点换序' },
+    { index: 4, time: 37.5, type: 'crossing', crossingPairs: [['probeA', 'probeC']], probeARate: 3.5, probeBRate: 2.5, probeCRate: 3.5, medianRate: 3.5, medianSource: 'probeC', reason: '曲线交点：探头A/探头C' },
+    { index: 5, time: 60, type: 'sample', crossingPairs: [], probeARate: 5, probeBRate: 1, probeCRate: 2, medianRate: 2, medianSource: 'probeC', reason: '采样节点' },
+  ],
+  segments: [
+    { index: 1, startBoundaryIndex: 1, endBoundaryIndex: 2, startTime: 0, endTime: 22.5, durationSeconds: 22.5, source: 'probeC', sourceReason: '探头C唯一排第 2', startRate: 2, endRate: 3.5, probeAStartRate: 1, probeAEndRate: 2.5, probeBStartRate: 5, probeBEndRate: 3.5, probeCStartRate: 2, probeCEndRate: 3.5, contribution: 1.03125 },
+    { index: 2, startBoundaryIndex: 2, endBoundaryIndex: 3, startTime: 22.5, endTime: 30, durationSeconds: 7.5, source: 'probeB', sourceReason: '探头B唯一排第 2', startRate: 3.5, endRate: 3, probeAStartRate: 2.5, probeAEndRate: 3, probeBStartRate: 3.5, probeBEndRate: 3, probeCStartRate: 3.5, probeCEndRate: 4, contribution: 0.40625 },
+    { index: 3, startBoundaryIndex: 3, endBoundaryIndex: 4, startTime: 30, endTime: 37.5, durationSeconds: 7.5, source: 'probeA', sourceReason: '探头A/B并列低值，按固定 A→B→C 顺序由探头A贡献中位值', startRate: 3, endRate: 3.5, probeAStartRate: 3, probeAEndRate: 3.5, probeBStartRate: 3, probeBEndRate: 2.5, probeCStartRate: 4, probeCEndRate: 3.5, contribution: 0.40625 },
+    { index: 4, startBoundaryIndex: 4, endBoundaryIndex: 5, startTime: 37.5, endTime: 60, durationSeconds: 22.5, source: 'probeC', sourceReason: '探头C唯一排第 2', startRate: 3.5, endRate: 2, probeAStartRate: 3.5, probeAEndRate: 5, probeBStartRate: 2.5, probeBEndRate: 1, probeCStartRate: 3.5, probeCEndRate: 2, contribution: 1.03125 },
+  ],
+};
+
 function mockFetchResponse(status, body) {
   fetch.mockResolvedValueOnce({
     ok: status >= 200 && status < 300,
@@ -95,6 +151,10 @@ afterEach(() => {
 
 async function openDual(user) {
   await user.click(screen.getByRole('tab', { name: '双探头保守复核' }));
+}
+
+async function enableTriple(user) {
+  await user.click(screen.getByTestId('triple-mode-toggle'));
 }
 
 describe('双探头录入', () => {
@@ -246,5 +306,109 @@ describe('双探头失败隔离', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('两支探头必须结束于同一秒');
+  });
+});
+
+describe('三探头可选模式', () => {
+  it('启用后渲染探头C，提交到 /api/lethality/triple', async () => {
+    const user = userEvent.setup();
+    mockFetchResponse(200, tripleResponse);
+    render(<App />);
+    await openDual(user);
+    await enableTriple(user);
+
+    expect(screen.getByLabelText('探头C 时间 第1行')).toBeInTheDocument();
+    await user.click(screen.getByTestId('dual-submit'));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe('/api/lethality/triple');
+    const body = JSON.parse(options.body);
+    expect(body.probeC.points).toHaveLength(4);
+  });
+
+  it('摘要、共享边界表、片段表和图形使用同一组边界和来源', async () => {
+    const user = userEvent.setup();
+    mockFetchResponse(200, tripleResponse);
+    render(<App />);
+    await openDual(user);
+    await enableTriple(user);
+    await user.click(screen.getByTestId('dual-submit'));
+
+    const conclusion = await screen.findByTestId('dual-conclusion');
+    expect(conclusion).toHaveTextContent('三探头中位 F₀ = 2.875000');
+    expect(conclusion).toHaveTextContent('展示口径 2.88');
+
+    const boundaryRows = within(screen.getByTestId('triple-boundaries')).getAllByRole('row');
+    expect(boundaryRows).toHaveLength(6);
+    expect(boundaryRows[2]).toHaveTextContent('22.500000');
+    expect(boundaryRows[2]).toHaveTextContent('探头B/探头C');
+
+    const panel = screen.getByLabelText('三探头中位复核结果');
+    const segmentRows = within(panel).getAllByRole('row').slice(-6);
+    expect(segmentRows).toHaveLength(6); // 片段表头 + 4 段 + 合计
+    const dataRows = segmentRows.slice(1, 5);
+    expect(dataRows.map((row) => row.dataset.source)).toEqual([
+      'probeC',
+      'probeB',
+      'probeA',
+      'probeC',
+    ]);
+    expect(dataRows[0]).toHaveTextContent('0.000 → 22.500');
+    expect(dataRows[1]).toHaveTextContent('22.500 → 30.000');
+    expect(dataRows[2]).toHaveTextContent('固定 A→B→C');
+    expect(screen.getByTestId('dual-total')).toHaveTextContent('2.875000');
+
+    const svg = screen.getByLabelText('三探头致死速率曲线与逐刻中位值');
+    expect(svg).toBeInTheDocument();
+    const chartSegments = svg.querySelectorAll('[data-testid^="envelope-segment-"]');
+    expect(chartSegments).toHaveLength(4);
+    expect([...chartSegments].map((line) => line.dataset.segmentIndex)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+    expect([...chartSegments].map((line) => line.getAttribute('stroke'))).toEqual([
+      '#0b7a3b',
+      '#c05a00',
+      '#0b6bcb',
+      '#0b7a3b',
+    ]);
+    // 图表粗线的起止共享边界编号与片段表完全一致，内部共享边界为 22.5/30/37.5。
+    expect(chartSegments[1].dataset.startBoundaryIndex).toBe('2');
+    expect(chartSegments[1].dataset.endBoundaryIndex).toBe('3');
+    expect(svg.querySelectorAll('[data-testid^="shared-boundary-"]')).toHaveLength(3);
+
+    const contributions = dataRows.map((row) =>
+      Number(row.querySelector('td:last-child').textContent),
+    );
+    expect(contributions.reduce((a, b) => a + b, 0)).toBeCloseTo(2.875, 6);
+  });
+
+  it('第三路非法时拒绝本次分析且保留上一份有效三探头报告', async () => {
+    const user = userEvent.setup();
+    mockFetchResponse(200, tripleResponse);
+    render(<App />);
+    await openDual(user);
+    await enableTriple(user);
+    await user.click(screen.getByTestId('dual-submit'));
+    expect(await screen.findByTestId('dual-conclusion')).toBeInTheDocument();
+
+    mockFetchResponse(422, {
+      detail: {
+        message: '采样数据校验失败',
+        errors: [
+          { row: 2, field: 'time', probe: 'probeC', message: '相邻采样间隔不得超过 60 秒' },
+        ],
+      },
+    });
+    await user.click(screen.getByTestId('dual-submit'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('保留上一份有效三探头报告');
+    expect(alert).toHaveTextContent('探头C');
+    expect(screen.getByTestId('dual-conclusion')).toHaveTextContent('2.875000');
+    expect(screen.getByTestId('triple-boundaries')).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ const FIELD_LABELS = {
   probe: '双探头',
   probeA: '探头A',
   probeB: '探头B',
+  probeC: '探头C',
   body: '请求体',
 };
 

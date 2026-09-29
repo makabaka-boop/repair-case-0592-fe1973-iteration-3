@@ -7,10 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .lethality import THRESHOLD_MINUTES, compute_lethality, lethality_rate
+from .lethality_triple import compute_triple_lethality
 from .lethality_dual import compute_dual_lethality
-from .validation import ValidationIssue, validate_dual_payload, validate_payload
+from .validation import (
+    ValidationIssue,
+    validate_dual_payload,
+    validate_payload,
+    validate_triple_payload,
+)
 
-app = FastAPI(title="蒸汽杀菌致死量 F₀ 复核", version="1.1.0")
+app = FastAPI(title="蒸汽杀菌致死量 F₀ 复核", version="1.2.0")
 
 # 内部质检工具：放开跨域以便本地开发直连；生产部署经 nginx 同源代理
 app.add_middleware(
@@ -95,6 +101,90 @@ def _probe_curve_dict(curve) -> dict:
         ],
         "totalUnrounded": curve.total_unrounded,
         "f0": curve.f0,
+    }
+
+
+@app.post("/api/lethality/triple")
+async def calculate_triple(request: Request):
+    """三探头中位复核：共享边界、片段表和速率图来自同一计算结果。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        return _validation_response(
+            [ValidationIssue(None, "body", "请求体必须为有效的 JSON")]
+        )
+
+    probes, issues = validate_triple_payload(payload)
+    if issues:
+        return _validation_response(issues)
+
+    result = compute_triple_lethality(
+        probes["probeA"], probes["probeB"], probes["probeC"]
+    )
+
+    def boundary_dict(boundary) -> dict:
+        return {
+            "index": boundary.index,
+            "time": boundary.time,
+            "type": boundary.type,
+            "crossingPairs": [list(pair) for pair in boundary.crossing_pairs],
+            "probeARate": boundary.rates[0],
+            "probeBRate": boundary.rates[1],
+            "probeCRate": boundary.rates[2],
+            "medianRate": boundary.median_rate,
+            "medianSource": boundary.median_source,
+            "reason": boundary.reason,
+            "medianReason": boundary.median_reason,
+        }
+
+    def segment_dict(segment) -> dict:
+        data = {
+            "index": segment.index,
+            "startBoundaryIndex": segment.index,
+            "endBoundaryIndex": segment.index + 1,
+            "startTime": segment.start_time,
+            "endTime": segment.end_time,
+            "durationSeconds": segment.duration_seconds,
+            "source": segment.source,
+            "sourceReason": segment.source_reason,
+            "startRate": segment.start_rate,
+            "endRate": segment.end_rate,
+            "contribution": segment.contribution,
+            "probeAStartRate": segment.probe_rates_start[0],
+            "probeAEndRate": segment.probe_rates_end[0],
+            "probeBStartRate": segment.probe_rates_start[1],
+            "probeBEndRate": segment.probe_rates_end[1],
+            "probeCStartRate": segment.probe_rates_start[2],
+            "probeCEndRate": segment.probe_rates_end[2],
+            "orderedStartRates": [
+                {"probe": probe, "rate": rate}
+                for probe, rate in segment.ordered_rates_start
+            ],
+            "orderedEndRates": [
+                {"probe": probe, "rate": rate}
+                for probe, rate in segment.ordered_rates_end
+            ],
+        }
+        return data
+
+    return {
+        "mode": "triple",
+        "threshold": result.threshold,
+        "probeA": _probe_curve_dict(result.probe_a),
+        "probeB": _probe_curve_dict(result.probe_b),
+        "probeC": _probe_curve_dict(result.probe_c),
+        "probeATotalUnrounded": result.probe_a.total_unrounded,
+        "probeBTotalUnrounded": result.probe_b.total_unrounded,
+        "probeCTotalUnrounded": result.probe_c.total_unrounded,
+        "probeAF0": result.probe_a.f0,
+        "probeBF0": result.probe_b.f0,
+        "probeCF0": result.probe_c.f0,
+        "medianUnrounded": result.median_unrounded,
+        "medianF0": result.median_f0,
+        "passed": result.passed,
+        "shortfall": result.shortfall,
+        "boundaries": [boundary_dict(b) for b in result.boundaries],
+        "segments": [segment_dict(s) for s in result.segments],
     }
 
 

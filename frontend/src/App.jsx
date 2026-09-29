@@ -84,7 +84,7 @@ export default function App() {
       <p className="hint">
         录入釜内探头采样：时间从 0 秒起严格递增、相邻间隔 ≤ 60 秒，温度 100.0–140.0
         °C。提交后按梯形法积分，各段未舍入累加，F₀ 四舍五入保留两位小数，达到
-        3.00 min 即放行。两支探头采样时刻不一致时，请用双探头保守复核入口。
+        3.00 min 即放行。两支或三支探头采样时刻不一致时，请用多探头复核入口。
       </p>
 
       <div className="mode-switch" role="tablist" aria-label="复核模式">

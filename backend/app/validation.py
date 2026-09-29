@@ -18,7 +18,8 @@ MAX_TEMPERATURE_C = 140.0
 
 PROBE_A = "probeA"
 PROBE_B = "probeB"
-PROBE_LABELS = {PROBE_A: "探头A", PROBE_B: "探头B"}
+PROBE_C = "probeC"
+PROBE_LABELS = {PROBE_A: "探头A", PROBE_B: "探头B", PROBE_C: "探头C"}
 
 
 @dataclass(frozen=True)
@@ -130,28 +131,34 @@ def validate_payload(payload: Any) -> tuple[list[tuple[int, float]], list[Valida
     return validate_points(payload.get("points"))
 
 
-def validate_dual_payload(
+def validate_multi_probe_payload(
     payload: Any,
+    probe_names: tuple[str, ...] = (PROBE_A, PROBE_B),
 ) -> tuple[dict[str, list[tuple[int, float]]], list[ValidationIssue]]:
-    """双探头接口：两支探头各自独立遵守单探头的全部校验。
+    """校验多探头请求；每支探头独立遵守单探头的全部采样规则。
 
-    返回 ({"probeA": points, "probeB": points}, 问题列表)。
-    两支探头都必须从 0 秒开始，并结束于同一秒；后者是跨探头规则，
-    仅在两支探头各自的时间序列本身合法时检查。
+    返回以探头名为键的采样点字典。只有所有探头的时间序列本身可用时，
+    才检查共同时间域（现有业务要求均从 0 秒开始并结束于同一秒），
+    避免在单点、时间非法等错误上叠加跨探头误报。
     """
     if not isinstance(payload, dict):
+        if probe_names == (PROBE_A, PROBE_B):
+            message = "请求体必须为包含 probeA 与 probeB 两个采样数组的对象"
+        else:
+            labels = "、".join(PROBE_LABELS[name] for name in probe_names)
+            message = f"请求体必须为包含 {labels} 采样数组的对象"
         return {}, [
             ValidationIssue(
                 None,
                 "body",
-                "请求体必须为包含 probeA 与 probeB 两个采样数组的对象",
+                message,
             )
         ]
 
     issues: list[ValidationIssue] = []
     probes: dict[str, list[tuple[int, float]]] = {}
     valid_series: dict[str, list[tuple[int, float]]] = {}
-    for probe in (PROBE_A, PROBE_B):
+    for probe in probe_names:
         raw_probe = payload.get(probe)
         if not isinstance(raw_probe, dict):
             issues.append(
@@ -167,25 +174,52 @@ def validate_dual_payload(
         points, probe_issues = validate_points(raw_probe.get("points"), probe)
         probes[probe] = points
         issues.extend(probe_issues)
-        # 仅当该探头有可用的时间序列（≥2 点且时间跨行规则无问题）时，
-        # 才拿它的结束时刻参与跨探头比较；点数不足或时间非法时不报
-        # “结束于同一秒”，避免级联误报。温度非法不影响时间。
         time_bad = any(i.field == "time" for i in probe_issues)
         if not time_bad and len(points) >= MIN_POINTS:
             valid_series[probe] = points
 
-    if len(valid_series) == 2:
-        end_a = valid_series[PROBE_A][-1][0]
-        end_b = valid_series[PROBE_B][-1][0]
-        if end_a != end_b:
+    if len(valid_series) == len(probe_names):
+        ends = {name: valid_series[name][-1][0] for name in probe_names}
+        ends_match = len(set(ends.values())) == 1
+        if len(probe_names) == 2:
+            end_a = ends[PROBE_A]
+            end_b = ends[PROBE_B]
+            if end_a != end_b:
+                issues.append(
+                    ValidationIssue(
+                        None,
+                        "probe",
+                        f"两支探头必须结束于同一秒"
+                        f"（{PROBE_LABELS[PROBE_A]}结束于 {end_a} 秒，"
+                        f"{PROBE_LABELS[PROBE_B]}结束于 {end_b} 秒）",
+                    )
+                )
+        elif not ends_match:
+            details = "，".join(
+                f"{PROBE_LABELS[name]} 0–{ends[name]} 秒"
+                for name in probe_names
+            )
             issues.append(
                 ValidationIssue(
                     None,
                     "probe",
-                    f"两支探头必须结束于同一秒"
-                    f"（{PROBE_LABELS[PROBE_A]}结束于 {end_a} 秒，"
-                    f"{PROBE_LABELS[PROBE_B]}结束于 {end_b} 秒）",
+                    f"三支探头必须拥有共同时间域（均从 0 秒开始并结束于同一秒；"
+                    f"当前 {details}）",
                 )
             )
 
     return probes, issues
+
+
+def validate_dual_payload(
+    payload: Any,
+) -> tuple[dict[str, list[tuple[int, float]]], list[ValidationIssue]]:
+    """双探头接口：两支探头各自独立遵守单探头的全部校验。"""
+    return validate_multi_probe_payload(payload, (PROBE_A, PROBE_B))
+
+
+def validate_triple_payload(
+    payload: Any,
+) -> tuple[dict[str, list[tuple[int, float]]], list[ValidationIssue]]:
+    """三探头接口：第三路缺样、非法或共同时间域不满足时整次请求拒绝。"""
+    return validate_multi_probe_payload(payload, (PROBE_A, PROBE_B, PROBE_C))

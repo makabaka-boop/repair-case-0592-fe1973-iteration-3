@@ -262,7 +262,81 @@ def main() -> int:
         f"{status} {body}",
     )
 
-    # 15. 旧接口保持兼容：响应不含双探头字段
+    # 15. 三探头中位复核：手算 A 1→5、B 5→1、C 2→4→2。
+    # 共享边界为 0 / 22.5 / 30 / 37.5 / 60，来源 C→B→A→C，总量 2.875。
+    triple_cross = {
+        "probeA": {"points": [
+            {"time": 0, "temperature": temp_for_rate(1.0)},
+            {"time": 60, "temperature": temp_for_rate(5.0)},
+        ]},
+        "probeB": {"points": [
+            {"time": 0, "temperature": temp_for_rate(5.0)},
+            {"time": 60, "temperature": temp_for_rate(1.0)},
+        ]},
+        "probeC": {"points": [
+            {"time": 0, "temperature": temp_for_rate(2.0)},
+            {"time": 30, "temperature": temp_for_rate(4.0)},
+            {"time": 60, "temperature": temp_for_rate(2.0)},
+        ]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", triple_cross)
+    triple_segments = (body or {}).get("segments", []) if isinstance(body, dict) else []
+    triple_boundaries = (body or {}).get("boundaries", []) if isinstance(body, dict) else []
+    triple_sources = [s.get("source") for s in triple_segments]
+    boundary_times = [b.get("time") for b in triple_boundaries]
+    triple_ok = (
+        status == 200
+        and len(boundary_times) == 5
+        and all(abs(actual - expected) < 1e-9 for actual, expected in zip(
+            boundary_times, [0.0, 22.5, 30.0, 37.5, 60.0]
+        ))
+        and triple_sources == ["probeC", "probeB", "probeA", "probeC"]
+        and abs(body.get("medianUnrounded", 0) - 2.875) < 1e-9
+        and abs(body.get("medianF0", 0) - 2.88) < 1e-9
+        and body.get("passed") is False
+        and all(s.get("sourceReason") for s in triple_segments)
+        and all(
+            abs(triple_segments[i].get("startTime") - triple_boundaries[i].get("time")) < 1e-9
+            and abs(triple_segments[i].get("endTime") - triple_boundaries[i + 1].get("time")) < 1e-9
+            for i in range(len(triple_segments))
+        )
+    )
+    check(
+        "三探头中位：按共享交点/采样边界换源、总量 2.875 且片段图表明细同源",
+        triple_ok,
+        f"{status} {boundary_times} {triple_sources} {body if not triple_ok else ''}",
+    )
+
+    # 16. 第三路缺样只拒绝本次三探头分析
+    missing_c = {
+        "probeA": {"points": passing["points"]},
+        "probeB": {"points": passing["points"]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", missing_c)
+    errors = (body or {}).get("detail", {}).get("errors", [])
+    check(
+        "三探头缺少 probeC 返回 422 且不产出结果",
+        status == 422
+        and any(e.get("probe") == "probeC" and e.get("field") == "probeC" for e in errors)
+        and "medianUnrounded" not in (body or {}),
+        f"{status} {body}",
+    )
+
+    # 17. 三路共同时间域不一致
+    triple_domain = {
+        "probeA": {"points": passing["points"]},
+        "probeB": {"points": passing["points"]},
+        "probeC": {"points": [{"time": t, "temperature": 121.1} for t in (0, 60, 120, 179)]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", triple_domain)
+    errors = (body or {}).get("detail", {}).get("errors", [])
+    check(
+        "三探头结束时间域不一致返回 422",
+        status == 422 and any("共同时间域" in e.get("message", "") for e in errors),
+        f"{status} {body}",
+    )
+
+    # 18. 旧接口保持兼容：响应不含双/三探头字段
     status, body = request("POST", f"{API_URL}/api/lethality", passing)
     check(
         "单探头接口响应结构保持不变",

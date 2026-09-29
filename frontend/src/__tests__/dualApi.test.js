@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, calculateDualLethality } from '../api.js';
+import { ApiError, calculateDualLethality, calculateTripleLethality } from '../api.js';
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn());
@@ -94,5 +94,35 @@ describe('calculateDualLethality', () => {
     const error = await calculateDualLethality([], []).catch((e) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect(error.errors[0].message).toContain('无法连接服务器');
+  });
+});
+
+describe('calculateTripleLethality', () => {
+  it('以 POST JSON 调用 /api/lethality/triple 并携带三支探头', async () => {
+    const tripleResponse = {
+      mode: 'triple',
+      probeA: { points: [] },
+      probeB: { points: [] },
+      probeC: { points: [] },
+      medianUnrounded: 3,
+      segments: [],
+      boundaries: [],
+    };
+    fetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => tripleResponse });
+
+    const result = await calculateTripleLethality(
+      [{ time: 0, temperature: 121.1 }],
+      [{ time: 0, temperature: 121.2 }],
+      [{ time: 0, temperature: 121.3 }],
+    );
+
+    expect(result).toEqual(tripleResponse);
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe('/api/lethality/triple');
+    expect(JSON.parse(options.body)).toEqual({
+      probeA: { points: [{ time: 0, temperature: 121.1 }] },
+      probeB: { points: [{ time: 0, temperature: 121.2 }] },
+      probeC: { points: [{ time: 0, temperature: 121.3 }] },
+    });
   });
 });

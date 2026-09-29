@@ -172,11 +172,15 @@ button.primary {
   border-bottom-color: #0b6bcb;
 }
 
-/* 双探头录入区并列 */
+/* 多探头录入区并列 */
 .probe-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+
+.probe-grid.probe-count-3 {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .probe-editor h3 {
@@ -196,9 +200,31 @@ button.primary {
 
 /* 双探头结果 */
 .dual-result .totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
   font-size: 0.88rem;
   color: #3e4c59;
   margin: 6px 0 12px;
+}
+
+.triple-toggle {
+  margin: 12px 0;
+  font-weight: 600;
+}
+
+.boundary-table {
+  margin: 12px 0;
+  font-size: 0.82rem;
+}
+
+.boundary-table th,
+.boundary-table td {
+  padding: 6px 8px;
+}
+
+.reason-cell {
+  min-width: 180px;
 }
 
 .probe-chart {
@@ -236,6 +262,10 @@ button.primary {
   background: #c05a00;
 }
 
+.source-probeC {
+  background: #0b7a3b;
+}
+
 .source-both {
   background: #5b3ea6;
 }
@@ -246,6 +276,10 @@ tr[data-source='probeA'] td:first-child {
 
 tr[data-source='probeB'] td:first-child {
   border-left: 4px solid #c05a00;
+}
+
+tr[data-source='probeC'] td:first-child {
+  border-left: 4px solid #0b7a3b;
 }
 
 tr[data-source='both'] td:first-child {
