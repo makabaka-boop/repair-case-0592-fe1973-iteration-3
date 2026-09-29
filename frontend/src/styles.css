@@ -179,6 +179,11 @@ button.primary {
   gap: 16px;
 }
 
+/* 三探头录入区并列 */
+.probe-grid-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .probe-editor h3 {
   font-size: 0.98rem;
   margin: 4px 0 8px;
@@ -189,7 +194,8 @@ button.primary {
 }
 
 @media (max-width: 760px) {
-  .probe-grid {
+  .probe-grid,
+  .probe-grid-3 {
     grid-template-columns: 1fr;
   }
 }
@@ -236,6 +242,10 @@ button.primary {
   background: #c05a00;
 }
 
+.source-probeC {
+  background: #1e8e4a;
+}
+
 .source-both {
   background: #5b3ea6;
 }
@@ -248,6 +258,42 @@ tr[data-source='probeB'] td:first-child {
   border-left: 4px solid #c05a00;
 }
 
+tr[data-source='probeC'] td:first-child {
+  border-left: 4px solid #1e8e4a;
+}
+
 tr[data-source='both'] td:first-child {
   border-left: 4px solid #5b3ea6;
+}
+
+/* 三探头结果 */
+.triple-result .totals {
+  font-size: 0.88rem;
+  color: #3e4c59;
+  margin: 6px 0 12px;
+}
+
+.triple-segments {
+  margin-top: 12px;
+  font-size: 0.82rem;
+}
+
+.triple-segments th,
+.triple-segments td {
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.triple-segments .reason-cell {
+  white-space: normal;
+  min-width: 220px;
+  color: #3e4c59;
+}
+
+.triple-segments .tie-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.74rem;
+  color: #52606d;
+  white-space: normal;
 }

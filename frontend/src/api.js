@@ -42,3 +42,11 @@ export async function calculateDualLethality(probeAPoints, probeBPoints) {
     probeB: { points: probeBPoints },
   });
 }
+
+export async function calculateTripleLethality(probeAPoints, probeBPoints, probeCPoints) {
+  return postJson('/api/lethality/triple', {
+    probeA: { points: probeAPoints },
+    probeB: { points: probeBPoints },
+    probeC: { points: probeCPoints },
+  });
+}

@@ -8,9 +8,15 @@ from fastapi.responses import JSONResponse
 
 from .lethality import THRESHOLD_MINUTES, compute_lethality, lethality_rate
 from .lethality_dual import compute_dual_lethality
-from .validation import ValidationIssue, validate_dual_payload, validate_payload
+from .lethality_triple import compute_triple_lethality
+from .validation import (
+    ValidationIssue,
+    validate_dual_payload,
+    validate_payload,
+    validate_triple_payload,
+)
 
-app = FastAPI(title="蒸汽杀菌致死量 F₀ 复核", version="1.1.0")
+app = FastAPI(title="蒸汽杀菌致死量 F₀ 复核", version="1.2.0")
 
 # 内部质检工具：放开跨域以便本地开发直连；生产部署经 nginx 同源代理
 app.add_middleware(
@@ -143,4 +149,74 @@ async def calculate_dual(request: Request):
             }
             for s in result.segments
         ],
+    }
+
+
+@app.post("/api/lethality/triple")
+async def calculate_triple(request: Request):
+    """三探头中位复核：三探头各自校验后，在逐时刻中位速率曲线上积分 F₀。
+
+    计算摘要、片段表与图表共用本响应同一份 segments：段边界同时是切分
+    边界与图形折线端点，source/tie/order/reason 说明每段中位来源的裁决。
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return _validation_response(
+            [ValidationIssue(None, "body", "请求体必须为有效的 JSON")]
+        )
+
+    probes, issues = validate_triple_payload(payload)
+    if issues:
+        return _validation_response(issues)
+
+    result = compute_triple_lethality(
+        probes["probeA"], probes["probeB"], probes["probeC"]
+    )
+    segment_dicts = []
+    for s in result.segments:
+        segment = {
+            "index": s.index,
+            "startTime": s.start_time,
+            "endTime": s.end_time,
+            "durationSeconds": s.duration_seconds,
+            "source": s.source,
+            "tie": list(s.tie),
+            "startOrder": list(s.start_order),
+            "endOrder": list(s.end_order),
+            "reason": s.reason,
+            "startRate": s.start_rate,
+            "endRate": s.end_rate,
+            "probeAStartRate": s.rate_a_start,
+            "probeAEndRate": s.rate_a_end,
+            "probeBStartRate": s.rate_b_start,
+            "probeBEndRate": s.rate_b_end,
+            "probeCStartRate": s.rate_c_start,
+            "probeCEndRate": s.rate_c_end,
+            "contribution": s.contribution,
+        }
+        segment_dicts.append(segment)
+
+    curve_dicts = {
+        "probeA": _probe_curve_dict(result.probe_a),
+        "probeB": _probe_curve_dict(result.probe_b),
+        "probeC": _probe_curve_dict(result.probe_c),
+    }
+    return {
+        "threshold": result.threshold,
+        "probeA": curve_dicts["probeA"],
+        "probeB": curve_dicts["probeB"],
+        "probeC": curve_dicts["probeC"],
+        "probeATotalUnrounded": result.probe_a.total_unrounded,
+        "probeBTotalUnrounded": result.probe_b.total_unrounded,
+        "probeCTotalUnrounded": result.probe_c.total_unrounded,
+        "probeAF0": result.probe_a.f0,
+        "probeBF0": result.probe_b.f0,
+        "probeCF0": result.probe_c.f0,
+        # 中位总量：未舍入值用于放行判定与逐段复算，f0 仅为展示口径
+        "medianUnrounded": result.median_unrounded,
+        "medianF0": result.median_f0,
+        "passed": result.passed,
+        "shortfall": result.shortfall,
+        "segments": segment_dicts,
     }

@@ -3,6 +3,7 @@ import { ApiError, calculateLethality } from './api.js';
 import { fieldLabel } from './format.js';
 import ResultPanel from './ResultPanel.jsx';
 import DualProbeView from './DualProbeView.jsx';
+import TripleProbeView from './TripleProbeView.jsx';
 
 // 默认示例：121.1 °C 恒温 180 秒，F₀ 恰为 3.00 min
 const DEFAULT_ROWS = [
@@ -23,7 +24,7 @@ function toPayload(rows) {
 }
 
 export default function App() {
-  const [mode, setMode] = useState('single'); // single | dual
+  const [mode, setMode] = useState('single'); // single | dual | triple
   const [rows, setRows] = useState(DEFAULT_ROWS);
   const [result, setResult] = useState(null);
   const [errors, setErrors] = useState([]);
@@ -84,7 +85,8 @@ export default function App() {
       <p className="hint">
         录入釜内探头采样：时间从 0 秒起严格递增、相邻间隔 ≤ 60 秒，温度 100.0–140.0
         °C。提交后按梯形法积分，各段未舍入累加，F₀ 四舍五入保留两位小数，达到
-        3.00 min 即放行。两支探头采样时刻不一致时，请用双探头保守复核入口。
+        3.00 min 即放行。两支探头采样时刻不一致时用双探头保守复核；三支探头取
+        逐刻中位速率复核时用三探头中位复核入口。
       </p>
 
       <div className="mode-switch" role="tablist" aria-label="复核模式">
@@ -105,6 +107,15 @@ export default function App() {
           onClick={() => setMode('dual')}
         >
           双探头保守复核
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'triple'}
+          className={mode === 'triple' ? 'active' : undefined}
+          onClick={() => setMode('triple')}
+        >
+          三探头中位复核
         </button>
       </div>
 
@@ -189,8 +200,10 @@ export default function App() {
 
           <ResultPanel result={result} />
         </>
-      ) : (
+      ) : mode === 'dual' ? (
         <DualProbeView />
+      ) : (
+        <TripleProbeView />
       )}
     </main>
   );

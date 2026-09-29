@@ -271,6 +271,127 @@ def main() -> int:
         f"{status} {body}",
     )
 
+    # 16. 三探头中位复核：相同探头 ⇒ 中位总量 3.00，各段三探头并列裁 probeA
+    triple_same = {
+        "probeA": {"points": passing["points"]},
+        "probeB": {"points": passing["points"]},
+        "probeC": {"points": passing["points"]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", triple_same)
+    ok = (
+        status == 200
+        and body.get("passed") is True
+        and abs(body.get("medianUnrounded", 0) - 3.0) < 1e-9
+        and len(body.get("segments", [])) == 3
+        and all(s.get("source") == "probeA" for s in body.get("segments", []))
+        and all(s.get("tie") == ["probeA", "probeB", "probeC"] for s in body.get("segments", []))
+        and abs(body.get("probeCTotalUnrounded", 0) - 3.0) < 1e-9
+    )
+    check("三探头相同：中位 F₀=3.00、并列裁决取 probeA、三探头总量一致", ok, f"{status} {body}")
+
+    # 17. 三探头交点拆段：A 恒 2、B 1→4、C 4→1，交点 t=20/30/40，
+    # 来源序列 A,B,C,A，中位总量 25/12；摘要与片段同源
+    triple_cross = {
+        "probeA": {"points": [
+            {"time": 0, "temperature": temp_for_rate(2.0)},
+            {"time": 60, "temperature": temp_for_rate(2.0)},
+        ]},
+        "probeB": {"points": [
+            {"time": 0, "temperature": temp_for_rate(1.0)},
+            {"time": 60, "temperature": temp_for_rate(4.0)},
+        ]},
+        "probeC": {"points": [
+            {"time": 0, "temperature": temp_for_rate(4.0)},
+            {"time": 60, "temperature": temp_for_rate(1.0)},
+        ]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", triple_cross)
+    segments = (body or {}).get("segments", []) if isinstance(body, dict) else []
+    sources = [s.get("source") for s in segments]
+    boundaries = [segments[0]["startTime"]] + [s.get("endTime") for s in segments] if segments else []
+    durations = [s.get("durationSeconds", 0) for s in segments]
+    ok = (
+        status == 200
+        and sources == ["probeA", "probeB", "probeC", "probeA"]
+        and all(abs(a - b) < 1e-9 for a, b in zip(boundaries, [0, 20, 30, 40, 60]))
+        and all(d > 0 for d in durations)
+        and abs(body.get("medianUnrounded", 0) - 25.0 / 12.0) < 1e-9
+        and all("中位" in s.get("reason", "") for s in segments)
+        and body.get("passed") is False
+        and abs(sum(s.get("contribution", 0) for s in segments) - 25.0 / 12.0) < 1e-9
+    )
+    check(
+        "三探头换源：两两交点拆段 A→B→C→A、中位 25/12、片段连续无零时长",
+        ok,
+        f"{status} {sources} {boundaries} {body if not ok else ''}",
+    )
+
+    # 18. 三探头校验：probeC 第 2 行超间隔按探头定位
+    bad_triple = {
+        "probeA": {"points": passing["points"]},
+        "probeB": {"points": passing["points"]},
+        "probeC": {"points": [
+            {"time": 0, "temperature": 121.1},
+            {"time": 61, "temperature": 121.1},
+        ]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", bad_triple)
+    errors = (body or {}).get("detail", {}).get("errors", [])
+    check(
+        "三探头超间隔返回 422 并定位 probeC 第 2 行 time",
+        status == 422
+        and any(
+            e.get("probe") == "probeC" and e.get("row") == 2 and e.get("field") == "time"
+            for e in errors
+        ),
+        f"{status} {body}",
+    )
+
+    # 19. 第三路缺样：probeC 缺失返回 422
+    missing_c = {
+        "probeA": {"points": passing["points"]},
+        "probeB": {"points": passing["points"]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", missing_c)
+    errors = (body or {}).get("detail", {}).get("errors", [])
+    check(
+        "第三路缺样返回 422 并指向 probeC，且响应不含结果",
+        status == 422
+        and any(e.get("probe") == "probeC" for e in errors)
+        and "medianUnrounded" not in (body or {}),
+        f"{status} {body}",
+    )
+
+    # 20. 三探头结束秒不一致
+    end_mismatch_triple = {
+        "probeA": {"points": passing["points"]},
+        "probeB": {"points": passing["points"]},
+        "probeC": {"points": [
+            {"time": 0, "temperature": 121.1},
+            {"time": 60, "temperature": 121.1},
+        ]},
+    }
+    status, body = request("POST", f"{API_URL}/api/lethality/triple", end_mismatch_triple)
+    errors = (body or {}).get("detail", {}).get("errors", [])
+    check(
+        "三探头结束秒不一致返回 422",
+        status == 422 and any("三支探头必须结束于同一秒" in e.get("message", "") for e in errors),
+        f"{status} {body}",
+    )
+
+    # 21. 双探头接口收到多余 probeC 不升级为三探头，响应无 probeC 字段
+    status, body = request("POST", f"{API_URL}/api/lethality/dual", {
+        "probeA": {"points": passing["points"]},
+        "probeB": {"points": passing["points"]},
+        "probeC": {"points": passing["points"]},
+    })
+    check(
+        "双探头接口忽略多余 probeC，语义保持兼容",
+        status == 200 and isinstance(body, dict) and "probeC" not in body
+        and "medianUnrounded" not in body,
+        f"{status} {body}",
+    )
+
     print("=" * 48, flush=True)
     if failures:
         print(f"验收失败：{len(failures)} 项未通过", flush=True)

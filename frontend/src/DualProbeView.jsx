@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { ApiError, calculateDualLethality } from './api.js';
 import { fieldLabel, formatMinutes } from './format.js';
 import ProbeChart, { SOURCE_STYLE } from './ProbeChart.jsx';
-
-const MIN_ROWS = 2;
+import ProbeEditorTable, { PROBE_LABELS } from './ProbeEditorTable.jsx';
 
 // 默认示例：两支探头采样时刻不一致且速率线多次换源，
 // 用于直接演示并集插值与交点拆段；保守总量高于 3.00 min 门槛，判放行。
@@ -29,66 +28,7 @@ function toPoints(rows) {
 }
 
 function probeName(probe) {
-  return probe === 'probeA' ? '探头A' : '探头B';
-}
-
-function ProbeTable({ probe, rows, errorRows, onChange, onAdd, onRemove }) {
-  return (
-    <div className="probe-editor">
-      <h3>{probeName(probe)}</h3>
-      <table className="samples">
-        <thead>
-          <tr>
-            <th>行</th>
-            <th>时间 (秒)</th>
-            <th>温度 (°C)</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr
-              key={index}
-              className={errorRows.has(index + 1) ? 'row-error' : undefined}
-            >
-              <td className="row-index">{index + 1}</td>
-              <td>
-                <input
-                  aria-label={`${probeName(probe)} 时间 第${index + 1}行`}
-                  inputMode="numeric"
-                  value={row.time}
-                  onChange={(e) => onChange(probe, index, 'time', e.target.value)}
-                />
-              </td>
-              <td>
-                <input
-                  aria-label={`${probeName(probe)} 温度 第${index + 1}行`}
-                  inputMode="decimal"
-                  value={row.temperature}
-                  onChange={(e) =>
-                    onChange(probe, index, 'temperature', e.target.value)
-                  }
-                />
-              </td>
-              <td>
-                <button
-                  type="button"
-                  aria-label={`${probeName(probe)} 删除 第${index + 1}行`}
-                  onClick={() => onRemove(probe, index)}
-                  disabled={rows.length <= MIN_ROWS}
-                >
-                  删除
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <button type="button" className="add-row" onClick={() => onAdd(probe)}>
-        添加采样行
-      </button>
-    </div>
-  );
+  return PROBE_LABELS[probe] ?? probe;
 }
 
 function ConservativePanel({ result }) {
@@ -242,7 +182,7 @@ export default function DualProbeView() {
       </p>
 
       <div className="probe-grid">
-        <ProbeTable
+        <ProbeEditorTable
           probe="probeA"
           rows={rowsA}
           errorRows={errorRows('probeA')}
@@ -250,7 +190,7 @@ export default function DualProbeView() {
           onAdd={addRow}
           onRemove={removeRow}
         />
-        <ProbeTable
+        <ProbeEditorTable
           probe="probeB"
           rows={rowsB}
           errorRows={errorRows('probeB')}

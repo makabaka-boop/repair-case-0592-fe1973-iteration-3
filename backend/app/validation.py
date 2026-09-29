@@ -18,7 +18,8 @@ MAX_TEMPERATURE_C = 140.0
 
 PROBE_A = "probeA"
 PROBE_B = "probeB"
-PROBE_LABELS = {PROBE_A: "探头A", PROBE_B: "探头B"}
+PROBE_C = "probeC"
+PROBE_LABELS = {PROBE_A: "探头A", PROBE_B: "探头B", PROBE_C: "探头C"}
 
 
 @dataclass(frozen=True)
@@ -130,28 +131,24 @@ def validate_payload(payload: Any) -> tuple[list[tuple[int, float]], list[Valida
     return validate_points(payload.get("points"))
 
 
-def validate_dual_payload(
+def _validate_multi_payload(
     payload: Any,
+    probes: tuple[str, ...],
+    body_message: str,
+    end_mismatch_prefix: str,
 ) -> tuple[dict[str, list[tuple[int, float]]], list[ValidationIssue]]:
-    """双探头接口：两支探头各自独立遵守单探头的全部校验。
+    """多探头接口共用校验：各探头独立遵守单探头全部校验，并结束于同一秒。
 
-    返回 ({"probeA": points, "probeB": points}, 问题列表)。
-    两支探头都必须从 0 秒开始，并结束于同一秒；后者是跨探头规则，
-    仅在两支探头各自的时间序列本身合法时检查。
+    返回 ({"probeA": points, ...}, 问题列表)。
+    仅在各探头自己的时间序列合法时才比较结束时刻，避免级联误报。
     """
     if not isinstance(payload, dict):
-        return {}, [
-            ValidationIssue(
-                None,
-                "body",
-                "请求体必须为包含 probeA 与 probeB 两个采样数组的对象",
-            )
-        ]
+        return {}, [ValidationIssue(None, "body", body_message)]
 
     issues: list[ValidationIssue] = []
-    probes: dict[str, list[tuple[int, float]]] = {}
     valid_series: dict[str, list[tuple[int, float]]] = {}
-    for probe in (PROBE_A, PROBE_B):
+    result: dict[str, list[tuple[int, float]]] = {}
+    for probe in probes:
         raw_probe = payload.get(probe)
         if not isinstance(raw_probe, dict):
             issues.append(
@@ -162,10 +159,10 @@ def validate_dual_payload(
                     probe,
                 )
             )
-            probes[probe] = []
+            result[probe] = []
             continue
         points, probe_issues = validate_points(raw_probe.get("points"), probe)
-        probes[probe] = points
+        result[probe] = points
         issues.extend(probe_issues)
         # 仅当该探头有可用的时间序列（≥2 点且时间跨行规则无问题）时，
         # 才拿它的结束时刻参与跨探头比较；点数不足或时间非法时不报
@@ -174,18 +171,52 @@ def validate_dual_payload(
         if not time_bad and len(points) >= MIN_POINTS:
             valid_series[probe] = points
 
-    if len(valid_series) == 2:
-        end_a = valid_series[PROBE_A][-1][0]
-        end_b = valid_series[PROBE_B][-1][0]
-        if end_a != end_b:
+    if len(valid_series) == len(probes):
+        end_seconds = {probe: valid_series[probe][-1][0] for probe in probes}
+        if len(set(end_seconds.values())) > 1:
+            detail = "，".join(
+                f"{PROBE_LABELS[probe]}结束于 {end_seconds[probe]} 秒"
+                for probe in probes
+            )
             issues.append(
                 ValidationIssue(
                     None,
                     "probe",
-                    f"两支探头必须结束于同一秒"
-                    f"（{PROBE_LABELS[PROBE_A]}结束于 {end_a} 秒，"
-                    f"{PROBE_LABELS[PROBE_B]}结束于 {end_b} 秒）",
+                    f"{end_mismatch_prefix}（{detail}）",
                 )
             )
 
-    return probes, issues
+    return result, issues
+
+
+def validate_dual_payload(
+    payload: Any,
+) -> tuple[dict[str, list[tuple[int, float]]], list[ValidationIssue]]:
+    """双探头接口：两支探头各自独立遵守单探头的全部校验。
+
+    返回 ({"probeA": points, "probeB": points}, 问题列表)。
+    两支探头都必须从 0 秒开始，并结束于同一秒；后者是跨探头规则，
+    仅在两支探头各自的时间序列本身合法时检查。
+    """
+    return _validate_multi_payload(
+        payload,
+        (PROBE_A, PROBE_B),
+        "请求体必须为包含 probeA 与 probeB 两个采样数组的对象",
+        "两支探头必须结束于同一秒",
+    )
+
+
+def validate_triple_payload(
+    payload: Any,
+) -> tuple[dict[str, list[tuple[int, float]]], list[ValidationIssue]]:
+    """三探头接口：probeA/probeB/probeC 缺一不可，校验口径与双探头一致。
+
+    返回 ({"probeA": points, "probeB": points, "probeC": points}, 问题列表)。
+    第三路缺样（probeC 缺失或非法）只拒绝本次分析，由前端保留上一份报告。
+    """
+    return _validate_multi_payload(
+        payload,
+        (PROBE_A, PROBE_B, PROBE_C),
+        "请求体必须为包含 probeA、probeB 与 probeC 三个采样数组的对象",
+        "三支探头必须结束于同一秒",
+    )
